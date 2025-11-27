@@ -18,15 +18,20 @@ cached_products = []
 
 STATE_WAIT_ADD_NAME = "wait_add_name"
 STATE_WAIT_ADD_PRICE = "wait_add_price"
+STATE_WAIT_ADD_LIMIT_OPTION = "wait_add_limit_option"
+STATE_WAIT_ADD_LIMIT_VALUE = "wait_add_limit_value"
 STATE_WAIT_DEL_KEYWORD = "wait_del_keyword"
 STATE_WAIT_SEARCH_KEYWORD = "wait_search_keyword"
 STATE_WAIT_EDIT_KEYWORD = "wait_edit_keyword"
 STATE_WAIT_EDIT_PRICE = "wait_edit_price"
+STATE_WAIT_EDIT_CHOOSE_FIELD = "wait_edit_choose_field"
+STATE_WAIT_EDIT_LIMIT_OPTION = "wait_edit_limit_option"
+STATE_WAIT_EDIT_LIMIT_VALUE = "wait_edit_limit_value"
 
 def reload_cache():
     global cached_products
     cached_products = database.get_all_monitored_products()
-    print(f"🔄 Cache atualizado: {len(cached_products)} produtos globais.")
+    print(f"Cache atualizado: {len(cached_products)} produtos monitorados.")
 
 def cancel_state(user_id):
     if user_id in user_states: del user_states[user_id]
@@ -40,22 +45,37 @@ def log_analysis(channel, text, status, color_code="\033[0m"):
 @client.on(events.NewMessage(from_users=config.USER_IDS, pattern=r'^/(start|help|menu)'))
 async def show_menu(event):
     cancel_state(event.sender_id)
-    msg = "🤖 **PAINEL**\n\n🆕 /adicionar\n✏️ /editar\n🗑️ /remover\n📋 /listar\n🕵️‍♂️ /buscar\n❌ /cancelar"
+    msg = "🤖 **MENU**\n\n🆕 /adicionar\n✏️ /editar\n🗑️ /remover\n📋 /listar\n🕵️‍♂️ /buscar\n❌ /cancelar"
     await event.reply(msg)
 
 @client.on(events.NewMessage(from_users=config.USER_IDS, pattern=r'^/listar'))
 async def cmd_list(event):
     cancel_state(event.sender_id)
     my_products = database.list_user_products(event.sender_id)
+    
     if not my_products:
         await event.reply("📭 Lista vazia.")
         return
-    msg = "📋 **SEUS PRODUTOS:**\n\n"
+    
+    msg = "📋 **SEUS PRODUTOS MONITORADOS:**\n\n"
     for p in my_products:
         stats = p.get('stats', {})
         lowest = stats.get('lowest_price')
         low_fmt = f"R$ {lowest:.2f}" if lowest else "N/A"
-        msg += f"📦 **{p['keyword']}**\n🎯 Meta: R$ {p['my_target']:.2f}\n📉 Menor: {low_fmt}\n━━━━━━━━━━━━━━━━━━\n"
+        limit_val = p.get('my_limit', 0)
+        if limit_val > 0:
+            limit_fmt = f"R$ {limit_val:.2f}"
+        else:
+            limit_fmt = "Sem limite"
+
+        msg += (
+            f"📦 **{p['keyword']}**\n"
+            f"🎯 Meta: R$ {p['my_target']:.2f}\n"
+            f"🛡️ Limite: {limit_fmt}\n"
+            f"📉 Menor Preço Histórico: {low_fmt}\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+        )
+        
     await event.reply(msg)
 
 @client.on(events.NewMessage(from_users=config.USER_IDS, pattern=r'^/cancelar'))
@@ -116,12 +136,64 @@ async def dialogue_manager(event):
     elif state == STATE_WAIT_ADD_PRICE:
         try:
             price = float(text.replace(',', '.').strip())
-            keyword = temp_data[user_id]['keyword']
-            database.add_product_subscription(keyword, price, user_id)
+            temp_data[user_id]['price'] = price
+            
+            user_states[user_id] = STATE_WAIT_ADD_LIMIT_OPTION
+            
+            msg = (
+                f"💰 Meta definida: **R$ {price:.2f}**\n\n"
+                "🛡️ **Configurar Limite de Preço Mínimo**\n"
+                "Ajuda a ignorar acessórios ou alarmes falsos.\n\n"
+                "1️⃣ **Sem limite** (Notificar qualquer valor)\n"
+                "2️⃣ **Padrão** (40% da meta - Recomendado)\n"
+                "3️⃣ **Definir manualmente**\n\n"
+                "Digite o número da opção (1, 2 ou 3):"
+            )
+            await event.reply(msg)
+        except ValueError: 
+            await event.reply("❌ Valor inválido. Digite apenas números (ex: 150.00).")
+
+    elif state == STATE_WAIT_ADD_LIMIT_OPTION:
+        choice = text.strip()
+        keyword = temp_data[user_id]['keyword']
+        target_price = temp_data[user_id]['price']
+        
+        if choice == '1':
+            database.add_product_subscription(keyword, target_price, user_id, min_price=0)
             reload_cache()
-            await event.reply(f"✅ Monitorando **{keyword}** (R$ {price:.2f})")
+            await event.reply(f"✅ Monitorando **{keyword}**\n🎯 Meta: R$ {target_price:.2f}\n⚡ Sem limite mínimo.")
             cancel_state(user_id)
-        except ValueError: await event.reply("❌ Valor inválido.")
+            
+        elif choice == '2':
+            limit = target_price * 0.40
+            database.add_product_subscription(keyword, target_price, user_id, min_price=limit)
+            reload_cache()
+            await event.reply(f"✅ Monitorando **{keyword}**\n🎯 Meta: R$ {target_price:.2f}\n🛡️ Mínimo auto: R$ {limit:.2f}")
+            cancel_state(user_id)
+            
+        elif choice == '3':
+            user_states[user_id] = STATE_WAIT_ADD_LIMIT_VALUE
+            await event.reply(f"🔢 Digite o **valor mínimo** em R$ para ser notificado:")
+            
+        else:
+            await event.reply("❌ Opção inválida. Escolha 1, 2 ou 3.")
+
+    elif state == STATE_WAIT_ADD_LIMIT_VALUE:
+        try:
+            custom_limit = float(text.replace(',', '.').strip())
+            keyword = temp_data[user_id]['keyword']
+            target_price = temp_data[user_id]['price']
+            
+            if custom_limit >= target_price:
+                await event.reply("⚠️ O limite mínimo deve ser menor que a meta! Tente novamente:")
+                return
+
+            database.add_product_subscription(keyword, target_price, user_id, min_price=custom_limit)
+            reload_cache()
+            await event.reply(f"✅ Monitorando **{keyword}**\n🎯 Meta: R$ {target_price:.2f}\n🛡️ Mínimo: R$ {custom_limit:.2f}")
+            cancel_state(user_id)
+        except ValueError:
+            await event.reply("❌ Valor inválido.")
 
     elif state == STATE_WAIT_DEL_KEYWORD:
         keyword = text.strip()
@@ -134,12 +206,98 @@ async def dialogue_manager(event):
     elif state == STATE_WAIT_EDIT_KEYWORD:
         keyword = text.strip()
         my_prods = database.list_user_products(user_id)
-        if not any(p['keyword'] == keyword for p in my_prods):
+        
+        target_prod = next((p for p in my_prods if p['keyword'] == keyword), None)
+
+        if not target_prod:
             await event.reply("❌ Você não segue esse produto.")
             return
-        temp_data[user_id] = {'keyword': keyword}
-        user_states[user_id] = STATE_WAIT_EDIT_PRICE
-        await event.reply(f"📝 Editando **{keyword}**.\nNova Meta:")
+        
+        temp_data[user_id] = {
+            'keyword': keyword,
+            'current_target': target_prod['my_target']
+        }
+        
+        user_states[user_id] = STATE_WAIT_EDIT_CHOOSE_FIELD
+        msg = (
+            f"📝 Editando **{keyword}**\n"
+            f"O que deseja alterar?\n\n"
+            f"1️⃣ **Meta de Preço** (Atual: R$ {target_prod['my_target']:.2f})\n"
+            f"2️⃣ **Limite Mínimo** (Ignorar preços baixos)\n"
+        )
+        await event.reply(msg)
+
+    elif state == STATE_WAIT_EDIT_CHOOSE_FIELD:
+        if text.strip() == '1':
+            user_states[user_id] = STATE_WAIT_EDIT_PRICE
+            await event.reply("💰 Digite a **Nova Meta** de preço:")
+        
+        elif text.strip() == '2':
+            user_states[user_id] = STATE_WAIT_EDIT_LIMIT_OPTION
+            msg = (
+                "🛡️ **Configurar Limite de Preço Baixo**\n\n"
+                "1️⃣ **Sem limite** (Notificar tudo)\n"
+                "2️⃣ **Padrão** (40% da meta atual)\n"
+                "3️⃣ **Definir valor manualmente**"
+            )
+            await event.reply(msg)
+        else:
+            await event.reply("❌ Opção inválida. Digite 1 ou 2.")
+
+    elif state == STATE_WAIT_EDIT_PRICE:
+        try:
+            new_price = float(text.replace(',', '.').strip())
+            keyword = temp_data[user_id]['keyword']
+            
+            if database.update_user_subscription(user_id, keyword, new_target=new_price):
+                reload_cache()
+                await event.reply(f"✅ Meta de **{keyword}** atualizada para R$ {new_price:.2f}")
+            else: 
+                await event.reply("❌ Erro ao atualizar.")
+            cancel_state(user_id)
+        except ValueError: 
+            await event.reply("❌ Valor inválido.")
+
+    elif state == STATE_WAIT_EDIT_LIMIT_OPTION:
+        choice = text.strip()
+        keyword = temp_data[user_id]['keyword']
+        current_target = temp_data[user_id]['current_target']
+        if choice == '1':
+            database.update_user_subscription(user_id, keyword, new_min=0)
+            reload_cache()
+            await event.reply(f"✅ Limite de **{keyword}** removido (Notificar tudo).")
+            cancel_state(user_id)
+            
+        elif choice == '2':
+            limit = current_target * 0.40
+            database.update_user_subscription(user_id, keyword, new_min=limit)
+            reload_cache()
+            await event.reply(f"✅ Limite de **{keyword}** definido para R$ {limit:.2f}.")
+            cancel_state(user_id)
+            
+        elif choice == '3':
+            user_states[user_id] = STATE_WAIT_EDIT_LIMIT_VALUE
+            await event.reply(f"🔢 Digite o **novo valor mínimo**:")
+            
+        else:
+            await event.reply("❌ Opção inválida.")
+
+    elif state == STATE_WAIT_EDIT_LIMIT_VALUE:
+        try:
+            custom_limit = float(text.replace(',', '.').strip())
+            keyword = temp_data[user_id]['keyword']
+            current_target = temp_data[user_id]['current_target']
+
+            if custom_limit >= current_target:
+                await event.reply("⚠️ O limite mínimo deve ser menor que a meta de preço!")
+                return
+
+            database.update_user_subscription(user_id, keyword, new_min=custom_limit)
+            reload_cache()
+            await event.reply(f"✅ Limite de **{keyword}** atualizado para R$ {custom_limit:.2f}")
+            cancel_state(user_id)
+        except ValueError:
+            await event.reply("❌ Valor inválido.")
 
     elif state == STATE_WAIT_EDIT_PRICE:
         try:
@@ -167,7 +325,7 @@ async def dialogue_manager(event):
         min_threshold = target_price * 0.40
         MAX_SEARCH_LIMIT = 500
         
-        status_msg = await event.reply(f"⏳ Buscando `{keyword}`...\nLimite: {MAX_SEARCH_LIMIT} itens.")
+        status_msg = await event.reply(f"⏳ Buscando `{keyword}`...\nLimite: {MAX_SEARCH_LIMIT} registros.")
         
         limit_date, allowed_months = get_search_ranges()
         total_processed = 0
@@ -230,9 +388,9 @@ async def dialogue_manager(event):
                 f"🏁 **BUSCA: {keyword.upper()}**\n{limit_text}\n"
                 f"📊 Analisados: {total_processed}\n"
                 f"⚖️ Média: R$ {average_price:.2f}\n"
-                f"📉 Ofertas: {offers_found_count}\n━━━━━━━━━━━━\n"
+                f"📉 Ofertas abaixo da meta: {offers_found_count}\n━━━━━━━━━━━━\n"
                 f"🏆 **MELHOR:** R$ {best_offer['price']:.2f}\n"
-                f"📅 {best_offer['date'].strftime('%d/%m %H:%M')} | {best_offer['chat']}\n"
+                f"📅 {best_offer['date'].strftime('%d/%m/%y %H:%M')} | {best_offer['chat']}\n"
                 f"🔗 [VER OFERTA]({best_offer['link']})"
             )
         else: summary = f"🏁 **BUSCA: {keyword.upper()}**\n❌ Nenhuma oferta encontrada."
@@ -277,12 +435,13 @@ async def background_listener(event):
                 price, raw_match = extract_price(block, min_price_threshold=0)
                 
                 if price:
-                    if price < logging_threshold:
-                         log_analysis(chat_name, block, f"\033[93mIGNORADO (BAIXO: R${price:.0f})\033[0m")
-                         continue
-
                     price_found_in_msg = True
-                    log_analysis(chat_name, block, f"\033[92mOFERTA R$ {price:.0f}\033[0m")
+
+                    if price < logging_threshold:
+                        log_analysis(chat_name, block, f"\033[93mPREÇO ABAIXO DO MÍNIMO: R${price:.0f})\033[0m")
+                        continue
+
+                    log_analysis(chat_name, block, f"\033[92mOFERTA ENCONTRADA: R$ {price:.0f}\033[0m")
                     
                     database.update_product_stats(keyword, price, msg_date_br, event.chat_id, event.message.id)
                     
@@ -299,31 +458,30 @@ async def background_listener(event):
                             response = (
                                 f"🚨 **ALERTA!**\n📦 **{keyword.upper()}**\n"
                                 f"📉 **R$ {price:.2f}** (Meta: {user_target:.0f})\n"
-                                f"🏪 {chat_name}\n🔗 [VER]({msg_link})"
+                                f"🏪 {chat_name}\n🔗 [VER OFERTA]({msg_link})"
                             )
                             try: await client.send_message(user_id, response, link_preview=False)
                             except: pass
                     break 
             
             if not price_found_in_msg:
-                log_analysis(chat_name, msg_text, "\033[93mSEM PREÇO\033[0m")
+                log_analysis(chat_name, msg_text, "\033[93mPREÇO NÃO ENCONTRADO\033[0m")
 
     if not matched_any:
         log_analysis(chat_name, msg_text, "\033[90mIGNORADO\033[0m")
         pass
 
 async def main():
-    print("🔌 Iniciando Bot...")
+    print("Iniciando Bot...")
     await client.start()
     reload_cache()
-    print("📡 Escaneando diálogos...")
     dialogs = await client.get_dialogs()
     count = len([d for d in dialogs if d.is_channel or d.is_group])
-    print(f"✅ Conectado. Monitorando {count} canais.")
-    print(f"👤 Admins: {config.USER_IDS}")
+    print(f"Monitorando {count} canais.")
+    print(f"Usuários ativos: {config.USER_IDS}")
     print("-" * 50)
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
     try: asyncio.run(main())
-    except KeyboardInterrupt: print("\n🛑 Encerrado.")
+    except KeyboardInterrupt: print("\nBot Encerrado.")

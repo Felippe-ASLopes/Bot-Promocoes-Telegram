@@ -5,19 +5,24 @@ import config
 db = TinyDB(config.DB_NAME)
 products_table = db.table('produtos')
 
-def add_product_subscription(keyword, target_price, user_id):
+def add_product_subscription(keyword, target_price, user_id, min_price=0):
     Product = Query()
     existing = products_table.search(Product.keyword == keyword)
     user_id_str = str(user_id)
+
+    subscription_data = {
+        'target': target_price,
+        'min_price': min_price
+    }
 
     if existing:
         item = existing[0]
         subscribers = item.get('subscribers', {})
         
-        subscribers[user_id_str] = {'target': target_price}
+        subscribers[user_id_str] = subscription_data
         
         products_table.update({'subscribers': subscribers}, Product.keyword == keyword)
-        print(f"✅ Usuário {user_id} inscrito em '{keyword}' com meta {target_price}")
+        print(f"✅ Usuário {user_id} inscrito em '{keyword}' com meta {target_price} e min {min_price}")
     else:
         initial_stats = {
             'lowest_price': None,
@@ -32,12 +37,12 @@ def add_product_subscription(keyword, target_price, user_id):
             'keyword': keyword,
             'created_at': datetime.now().isoformat(),
             'subscribers': {
-                user_id_str: {'target': target_price}
+                user_id_str: subscription_data
             },
             'stats': initial_stats
         }
         products_table.insert(item)
-        print(f"✅ Produto '{keyword}' criado e usuário {user_id} inscrito.")
+        print(f"✅ Produto '{keyword}' criado e usuário {user_id} inscrito (min: {min_price}).")
 
 def remove_product_subscription(keyword, user_id):
     Product = Query()
@@ -73,6 +78,7 @@ def list_user_products(user_id):
         if user_id_str in subs:
             user_view = p.copy()
             user_view['my_target'] = subs[user_id_str]['target']
+            user_view['my_limit'] = subs[user_id_str].get('min_price', 0)
             user_products.append(user_view)
             
     return user_products
@@ -80,9 +86,9 @@ def list_user_products(user_id):
 def get_all_monitored_products():
     return products_table.all()
 
-def update_user_subscription(user_id, old_keyword, new_price=None):
+def update_user_subscription(user_id, keyword, new_target=None, new_min=None):
     Product = Query()
-    result = products_table.search(Product.keyword == old_keyword)
+    result = products_table.search(Product.keyword == keyword)
     
     if not result: return False
     
@@ -91,10 +97,17 @@ def update_user_subscription(user_id, old_keyword, new_price=None):
     user_id_str = str(user_id)
     
     if user_id_str in subscribers:
-        subscribers[user_id_str]['target'] = new_price
-        products_table.update({'subscribers': subscribers}, Product.keyword == old_keyword)
-        print(f"✅ Meta de {user_id} para '{old_keyword}' atualizada para {new_price}")
+        if new_target is not None:
+            subscribers[user_id_str]['target'] = new_target
+            print(f"✅ Meta de {user_id} para '{keyword}' atualizada para {new_target}")
+
+        if new_min is not None:
+            subscribers[user_id_str]['min_price'] = new_min
+            print(f"✅ Limite Mínimo de {user_id} para '{keyword}' atualizado para {new_min}")
+
+        products_table.update({'subscribers': subscribers}, Product.keyword == keyword)
         return True
+    
     return False
 
 def update_product_stats(keyword, price, date_obj, chat_id, message_id):
