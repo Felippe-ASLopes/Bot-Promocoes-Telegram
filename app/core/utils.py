@@ -1,6 +1,9 @@
 import re
-from datetime import datetime
+from app.core import config
+from datetime import datetime, timezone, timedelta
 from dateutil.relativedelta import relativedelta
+
+BR_TZ = timezone(timedelta(hours=-3))
 
 def get_search_ranges():
     today = datetime.now()
@@ -19,22 +22,28 @@ def get_search_ranges():
 
 def split_message_blocks(text):
     if not text: return []
-    if '—' in text: return [b.strip() for b in re.split(r'[-—_]{3,}', text) if b.strip()]
-    if len(text) > 500: return [b.strip() for b in text.split('\n\n') if b.strip()]
+
+    if re.search(r'[-—_=]{3,}', text):
+        return [b.strip() for b in re.split(r'[-—_=]{3,}', text) if b.strip()]
+
+    if len(text) > 500: 
+        return [b.strip() for b in text.split('\n\n') if b.strip()]
+        
     return [text]
 
 def extract_price(text, min_price_threshold=0):
     if not text: return None, None
     text_lower = text.lower()
     
-    text_cleaned = re.sub(r'(?:em|de|acima de|compras de)\s+(?:r\$)?\s*\d{1,5}(?:[.,]\d{3})*(?:[.,]\d{1,2})?', '', text_lower)
+    ignore_pattern = r'(?:' + '|'.join(config.IGNORE_PREFIXES) + r')\s+(?:r\$)?\s*\d{1,5}(?:[.,]\d{3})*(?:[.,]\d{1,2})?'
+    time_pattern = r'\b\d+\s+(?:' + '|'.join(config.TIME_UNITS) + r')\b'
+    trigger_pattern = r'(?:' + '|'.join(config.PRICE_TRIGGERS) + r')\s*:?\s*(?:r\$)?\s*(\d{1,5}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)'
+
+    text_cleaned = re.sub(ignore_pattern, '', text_lower)
     text_cleaned = re.sub(r'\d+\s?x', '', text_cleaned)
+    text_cleaned = re.sub(time_pattern, '', text_cleaned)
 
-    text_cleaned = re.sub(r'\b\d+\s+(?:dias|meses|anos|horas|minutos|segundos)\b', '', text_cleaned)
-
-    pattern = r'(?:por|valor|pix|vista|r\$)\s*:?\s*(?:r\$)?\s*(\d{1,5}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)'
-    
-    matches = re.finditer(pattern, text_cleaned)
+    matches = re.finditer(trigger_pattern, text_cleaned)
     valid_prices = []
 
     for match in matches:
@@ -50,7 +59,6 @@ def extract_price(text, min_price_threshold=0):
             
             if val_float < 1: continue 
             if val_float in [2024, 2025, 2026]: continue 
-            
             if val_float < min_price_threshold: continue
 
             valid_prices.append((val_float, match.group(0)))     

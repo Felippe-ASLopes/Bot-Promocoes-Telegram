@@ -1,8 +1,8 @@
 from tinydb import TinyDB, Query
 from datetime import datetime
-import config
+from app.core import config
 
-db = TinyDB(config.DB_NAME)
+db = TinyDB(config.DB_PATH)
 products_table = db.table('produtos')
 
 def add_product_subscription(keyword, target_price, user_id, min_price=0):

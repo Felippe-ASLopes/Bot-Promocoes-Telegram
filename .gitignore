@@ -206,12 +206,7 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Dados sensíveis e sessões
-# Arquivo com credenciais (API_ID, API_HASH)
-config.py
-db.json
-
+# Dados sensíveis (sessões do Telethon)
 sessao_userbot.session
 sessao_userbot.session-journal
-
 *.session
