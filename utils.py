@@ -30,6 +30,8 @@ def extract_price(text, min_price_threshold=0):
     text_cleaned = re.sub(r'(?:em|de|acima de|compras de)\s+(?:r\$)?\s*\d{1,5}(?:[.,]\d{3})*(?:[.,]\d{1,2})?', '', text_lower)
     text_cleaned = re.sub(r'\d+\s?x', '', text_cleaned)
 
+    text_cleaned = re.sub(r'\b\d+\s+(?:dias|meses|anos|horas|minutos|segundos)\b', '', text_cleaned)
+
     pattern = r'(?:por|valor|pix|vista|r\$)\s*:?\s*(?:r\$)?\s*(\d{1,5}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)'
     
     matches = re.finditer(pattern, text_cleaned)
