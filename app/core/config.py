@@ -18,6 +18,10 @@ USER_IDS = [
 SESSION_NAME = 'sessao_userbot'
 DB_NAME = 'db.json'
 
+# --- Configurações de Limites e Segurança ---
+SEARCH_LIMIT = 500 # Quantidade máxima de mensagens para processar na busca
+SEARCH_DELAY = 1.5 # Tempo de espera (em segundos) entre canais para evitar FloodWait durante a busca
+
 # --- Configurações de Busca (Regex) ---
 # Palavras que indicam que um preço vem a seguir
 PRICE_TRIGGERS = [ 'por', 'valor', 'pix', 'vista', 'r\$' ]
