@@ -127,6 +127,10 @@ python bot.py -clean
 python bot.py -sniper
 ```
 
+> 📡 Assim que iniciado, o Bot monitorará automaticamente **todos** os canais e grupos em for membro. Para adicionar novas fontes de monitoramento, basta compartilhar o link do convite e entrar no canal desejado através do Telegram do bot.
+
+> ⚠️ **Segurança e FloodWait:** O arquivo ``config.py`` possui variáveis de segurança para evitar restrições da API. Se estiver enfrentando problemas com FloodWait, experimente abaixar o valor de SEARCH_LIMIT e aumentar o SEARCH_DELAY, além disso diminua a quantidade de canais monitorados e usuários ativos.
+
 --- 
 
 ## 💬 Comandos do Bot
